@@ -23,7 +23,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ray.flowmeter.R
-import com.ray.flowmeter.utils.SpeedFormatter
 
 private val CardBackground = Color(0xF5131418)
 private val CardBorder = Color(0x22FFFFFF)
@@ -33,9 +32,7 @@ private val OrangeAccent = Color(0xFFFF9800)
 private val CyanAccent = Color(0xFF00E5FF)
 private val ProgressBarBg = Color(0x22FFFFFF)
 
-// Fixed dimensions for minimal floating overlay
-val FLOATING_WINDOW_WIDTH = 250.dp
-val FLOATING_WINDOW_HEIGHT = 180.dp
+val FLOATING_WINDOW_WIDTH = 240.dp
 
 @Composable
 fun FloatingTrafficCard(
@@ -45,28 +42,30 @@ fun FloatingTrafficCard(
 ) {
     Surface(
         modifier = modifier
-            .size(width = FLOATING_WINDOW_WIDTH, height = FLOATING_WINDOW_HEIGHT)
-            .clip(RoundedCornerShape(16.dp))
-            .border(1.dp, CardBorder, RoundedCornerShape(16.dp)),
+            .width(FLOATING_WINDOW_WIDTH)
+            .wrapContentHeight()
+            .clip(RoundedCornerShape(14.dp))
+            .border(1.dp, CardBorder, RoundedCornerShape(14.dp)),
         color = CardBackground,
-        shape = RoundedCornerShape(16.dp),
-        shadowElevation = 8.dp
+        shape = RoundedCornerShape(14.dp),
+        shadowElevation = 6.dp
     ) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 11.dp, vertical = 7.dp)
+                .fillMaxWidth()
+                .wrapContentHeight()
+                .padding(horizontal = 10.dp, vertical = 6.dp)
         ) {
-            // Drag handle pill at the top
+            // Top Drag Handle Pill
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 3.dp),
+                    .padding(bottom = 2.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Box(
                     modifier = Modifier
-                        .width(28.dp)
+                        .width(26.dp)
                         .height(3.dp)
                         .clip(RoundedCornerShape(1.5.dp))
                         .background(Color(0x44FFFFFF))
@@ -77,80 +76,77 @@ fun FloatingTrafficCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(22.dp),
+                    .height(20.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
                     text = stringResource(R.string.floating_window_title),
                     color = Color(0xEEFFFFFF),
-                    fontSize = 12.5.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold
                 )
 
                 IconButton(
                     onClick = onClose,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(20.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Close,
                         contentDescription = "Close",
                         tint = Color(0x99FFFFFF),
-                        modifier = Modifier.size(14.dp)
+                        modifier = Modifier.size(13.dp)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(5.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
             // Speed Chips Row (Download & Upload)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 SpeedChip(
-                    speedText = SpeedFormatter.formatBytes(state.rxSpeed),
+                    speedText = formatFloatingSpeed(state.rxSpeed),
                     isDownload = true,
                     modifier = Modifier.weight(1f)
                 )
 
                 SpeedChip(
-                    speedText = SpeedFormatter.formatBytes(state.txSpeed),
+                    speedText = formatFloatingSpeed(state.txSpeed),
                     isDownload = false,
                     modifier = Modifier.weight(1f)
                 )
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(5.dp))
 
             HorizontalDivider(
                 color = Color(0x18FFFFFF),
                 thickness = 0.5.dp
             )
 
-            // Fixed-height container for up to 3 active apps (preventing window resize/jitter)
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(top = 4.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                if (state.activeApps.isEmpty()) {
-                    Text(
-                        text = stringResource(R.string.floating_window_no_traffic),
-                        color = Color(0x55FFFFFF),
-                        fontSize = 11.sp,
-                        textAlign = TextAlign.Center
-                    )
-                } else {
-                    Column(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(3.dp)
-                    ) {
-                        state.activeApps.take(3).forEach { app ->
-                            AppTrafficRow(app = app)
-                        }
+            // Flexible container: only takes the exact space needed for active apps
+            if (state.activeApps.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.floating_window_no_traffic),
+                    color = Color(0x55FFFFFF),
+                    fontSize = 10.5.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 5.dp)
+                )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 3.dp, bottom = 1.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    state.activeApps.take(3).forEach { app ->
+                        AppTrafficRow(app = app)
                     }
                 }
             }
@@ -170,14 +166,14 @@ private fun SpeedChip(
 
     Row(
         modifier = modifier
-            .clip(RoundedCornerShape(7.dp))
+            .clip(RoundedCornerShape(6.dp))
             .background(Color(0x2B1F222A))
-            .padding(horizontal = 6.dp, vertical = 4.dp),
+            .padding(horizontal = 5.dp, vertical = 3.5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(15.dp)
+                .size(14.dp)
                 .clip(CircleShape)
                 .background(bgColor),
             contentAlignment = Alignment.Center
@@ -186,16 +182,16 @@ private fun SpeedChip(
                 imageVector = arrowIcon,
                 contentDescription = null,
                 tint = iconColor,
-                modifier = Modifier.size(10.dp)
+                modifier = Modifier.size(9.dp)
             )
         }
 
-        Spacer(modifier = Modifier.width(6.dp))
+        Spacer(modifier = Modifier.width(5.dp))
 
         Text(
             text = speedText,
             color = Color.White,
-            fontSize = 11.5.sp,
+            fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1
         )
@@ -210,7 +206,7 @@ private fun AppTrafficRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(25.dp),
+            .height(24.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // App Icon
@@ -219,13 +215,13 @@ private fun AppTrafficRow(
                 bitmap = app.icon,
                 contentDescription = app.appName,
                 modifier = Modifier
-                    .size(20.dp)
+                    .size(18.dp)
                     .clip(RoundedCornerShape(4.dp))
             )
         } else {
             Box(
                 modifier = Modifier
-                    .size(20.dp)
+                    .size(18.dp)
                     .clip(RoundedCornerShape(4.dp))
                     .background(Color(0x33FFFFFF)),
                 contentAlignment = Alignment.Center
@@ -233,13 +229,13 @@ private fun AppTrafficRow(
                 Text(
                     text = app.appName.firstOrNull()?.uppercase() ?: "?",
                     color = Color.White,
-                    fontSize = 10.sp,
+                    fontSize = 9.5.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
         }
 
-        Spacer(modifier = Modifier.width(7.dp))
+        Spacer(modifier = Modifier.width(6.dp))
 
         // Name + Speed + Progress Bar
         Column(
@@ -254,7 +250,7 @@ private fun AppTrafficRow(
                 Text(
                     text = app.appName,
                     color = Color(0xF0FFFFFF),
-                    fontSize = 11.sp,
+                    fontSize = 10.5.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -264,21 +260,21 @@ private fun AppTrafficRow(
                 Spacer(modifier = Modifier.width(4.dp))
 
                 Text(
-                    text = SpeedFormatter.formatBytes(app.totalSpeed),
+                    text = formatFloatingSpeed(app.totalSpeed),
                     color = Color(0xD9FFFFFF),
-                    fontSize = 10.5.sp,
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.SemiBold
                 )
             }
 
-            Spacer(modifier = Modifier.height(2.5.dp))
+            Spacer(modifier = Modifier.height(2.dp))
 
             // Dual-segment progress bar
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(2.5.dp)
-                    .clip(RoundedCornerShape(1.5.dp))
+                    .height(2.dp)
+                    .clip(RoundedCornerShape(1.dp))
                     .background(ProgressBarBg)
             ) {
                 val totalRatio = (app.rxRatio + app.txRatio).coerceIn(0.01f, 1f)
@@ -288,7 +284,7 @@ private fun AppTrafficRow(
                     modifier = Modifier
                         .fillMaxWidth(totalRatio)
                         .fillMaxHeight()
-                        .clip(RoundedCornerShape(1.5.dp))
+                        .clip(RoundedCornerShape(1.dp))
                 ) {
                     if (app.rxRatio > 0f) {
                         Box(

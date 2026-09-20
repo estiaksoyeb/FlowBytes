@@ -14,7 +14,23 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.Locale
 import kotlin.math.max
+
+/**
+ * Custom speed formatter strictly for the floating window.
+ * Displays exact bytes (e.g. 252 B/s) without altering global notification/widget formatting.
+ */
+fun formatFloatingSpeed(bytesPerSecond: Long): String {
+    val locale = Locale.getDefault()
+    val bytes = bytesPerSecond.coerceAtLeast(0L)
+    return when {
+        bytes >= 1_000_000_000L -> String.format(locale, "%.1f GB/s", bytes / 1_000_000_000.0)
+        bytes >= 1_000_000L -> String.format(locale, "%.1f MB/s", bytes / 1_000_000.0)
+        bytes >= 1_000L -> String.format(locale, "%.0f KB/s", bytes / 1_000.0)
+        else -> String.format(locale, "%d B/s", bytes)
+    }
+}
 
 class LiveAppTrafficSampler(private val context: Context) {
 
@@ -39,6 +55,16 @@ class LiveAppTrafficSampler(private val context: Context) {
     private var lastSampleTime: Long = 0L
     private var lastUidStats = mutableMapOf<Int, Pair<Long, Long>>() // uid -> (rx, tx)
 
+    // Active app tracking with decay/grace period (prevents rapid flickering)
+    private data class TrackedApp(
+        val uid: Int,
+        var rxSpeed: Long,
+        var txSpeed: Long,
+        var totalSpeed: Long,
+        var lastActiveTime: Long
+    )
+    private val activeAppHistory = mutableMapOf<Int, TrackedApp>()
+
     fun start(scope: CoroutineScope) {
         if (sampleJob?.isActive == true) return
 
@@ -47,11 +73,12 @@ class LiveAppTrafficSampler(private val context: Context) {
         lastTotalTxBytes = TrafficStats.getTotalTxBytes()
         lastSampleTime = System.currentTimeMillis()
         lastUidStats.clear()
+        activeAppHistory.clear()
         captureUidStats(lastUidStats)
 
         sampleJob = scope.launch(Dispatchers.IO) {
             while (isActive) {
-                delay(1200L)
+                delay(1500L) // Stable 1.5s interval
                 updateSample()
             }
         }
@@ -60,10 +87,7 @@ class LiveAppTrafficSampler(private val context: Context) {
     fun stop() {
         sampleJob?.cancel()
         sampleJob = null
-    }
-
-    fun toggleExpanded() {
-        _state.value = _state.value.copy(isExpanded = !_state.value.isExpanded)
+        activeAppHistory.clear()
     }
 
     private fun updateSample() {
@@ -85,11 +109,12 @@ class LiveAppTrafficSampler(private val context: Context) {
         lastTotalTxBytes = currentTotalTx
         lastSampleTime = now
 
-        // 2. Per-UID Speeds via NetworkStatsManager snapshot delta
+        // 2. Per-UID Speeds via NetworkStatsManager delta
         val currentUidStats = mutableMapOf<Int, Pair<Long, Long>>()
         captureUidStats(currentUidStats)
 
-        val activeList = mutableListOf<ActiveAppTraffic>()
+        // Identify current traffic deltas
+        val activeUidsThisCycle = mutableSetOf<Int>()
 
         for ((uid, currentBytes) in currentUidStats) {
             val previousBytes = lastUidStats[uid] ?: currentBytes
@@ -102,33 +127,64 @@ class LiveAppTrafficSampler(private val context: Context) {
                 val appTxSpeed = (txDiff / dtSec).toLong()
                 val appTotalSpeed = appRxSpeed + appTxSpeed
 
-                val info = resolveAppInfo(uid)
-                activeList.add(
-                    ActiveAppTraffic(
-                        uid = uid,
-                        packageName = info.packageName,
-                        appName = info.appName,
-                        icon = info.icon,
-                        rxSpeed = appRxSpeed,
-                        txSpeed = appTxSpeed,
-                        totalSpeed = appTotalSpeed
-                    )
+                activeAppHistory[uid] = TrackedApp(
+                    uid = uid,
+                    rxSpeed = appRxSpeed,
+                    txSpeed = appTxSpeed,
+                    totalSpeed = appTotalSpeed,
+                    lastActiveTime = now
                 )
+                activeUidsThisCycle.add(uid)
             }
         }
 
         // Update previous snapshot
         lastUidStats = currentUidStats
 
-        // Sort by speed descending
-        activeList.sortByDescending { it.totalSpeed }
+        // For apps that had traffic recently but were silent in this cycle:
+        // Keep them for a 3.5s grace period with decaying speed so the UI doesn't jump
+        val iterator = activeAppHistory.entries.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            val uid = entry.key
+            val tracked = entry.value
 
-        // Compute proportions for UI progress bars (relative to max active app speed)
-        val maxActiveSpeed = activeList.firstOrNull()?.totalSpeed?.coerceAtLeast(1L) ?: 1L
-        val formattedList = activeList.take(3).map { app ->
-            val rxRatio = (app.rxSpeed.toFloat() / maxActiveSpeed).coerceIn(0f, 1f)
-            val txRatio = (app.txSpeed.toFloat() / maxActiveSpeed).coerceIn(0f, 1f)
-            app.copy(rxRatio = rxRatio, txRatio = txRatio)
+            if (uid !in activeUidsThisCycle) {
+                val elapsedSinceActive = now - tracked.lastActiveTime
+                if (elapsedSinceActive > 3500L) {
+                    iterator.remove()
+                } else {
+                    // Decay speed smoothly to 0
+                    tracked.rxSpeed = (tracked.rxSpeed * 0.25).toLong()
+                    tracked.txSpeed = (tracked.txSpeed * 0.25).toLong()
+                    tracked.totalSpeed = tracked.rxSpeed + tracked.txSpeed
+                }
+            }
+        }
+
+        // Sort active apps by total speed (or freshness)
+        val sortedTracked = activeAppHistory.values
+            .sortedWith(compareByDescending<TrackedApp> { it.totalSpeed }.thenByDescending { it.lastActiveTime })
+            .take(3)
+
+        val maxActiveSpeed = sortedTracked.firstOrNull()?.totalSpeed?.coerceAtLeast(1L) ?: 1L
+
+        val formattedList = sortedTracked.map { tracked ->
+            val info = resolveAppInfo(tracked.uid)
+            val rxRatio = (tracked.rxSpeed.toFloat() / maxActiveSpeed).coerceIn(0f, 1f)
+            val txRatio = (tracked.txSpeed.toFloat() / maxActiveSpeed).coerceIn(0f, 1f)
+
+            ActiveAppTraffic(
+                uid = tracked.uid,
+                packageName = info.packageName,
+                appName = info.appName,
+                icon = info.icon,
+                rxSpeed = tracked.rxSpeed,
+                txSpeed = tracked.txSpeed,
+                totalSpeed = tracked.totalSpeed,
+                rxRatio = rxRatio,
+                txRatio = txRatio
+            )
         }
 
         _state.value = _state.value.copy(
@@ -142,7 +198,8 @@ class LiveAppTrafficSampler(private val context: Context) {
     private fun captureUidStats(outStats: MutableMap<Int, Pair<Long, Long>>) {
         val nsm = networkStatsManager ?: return
         val endTime = System.currentTimeMillis()
-        val startTime = endTime - (24L * 60 * 60 * 1000)
+        // Query recent 5 minutes only for extreme speed and low CPU usage
+        val startTime = endTime - (5L * 60 * 1000)
 
         val transports = listOf(
             NetworkCapabilities.TRANSPORT_CELLULAR,
@@ -164,7 +221,6 @@ class LiveAppTrafficSampler(private val context: Context) {
                 }
                 stats.close()
             } catch (_: Exception) {
-                // Permission or system failure, ignore gracefully
             }
         }
     }
@@ -172,7 +228,6 @@ class LiveAppTrafficSampler(private val context: Context) {
     private fun resolveAppInfo(uid: Int): CachedAppInfo {
         appInfoCache[uid]?.let { return it }
 
-        // Special system UIDs
         val resolved = when (uid) {
             Process.SYSTEM_UID -> CachedAppInfo("Android System", "android", loadSystemIcon())
             Process.SHELL_UID -> CachedAppInfo("Shell", "com.android.shell", null)
@@ -190,7 +245,7 @@ class LiveAppTrafficSampler(private val context: Context) {
                         val appInfo = packageManager.getApplicationInfo(pkg, 0)
                         val name = packageManager.getApplicationLabel(appInfo).toString()
                         val icon = try {
-                            packageManager.getApplicationIcon(appInfo).toBitmap(width = 64, height = 64).asImageBitmap()
+                            packageManager.getApplicationIcon(appInfo).toBitmap(width = 48, height = 48).asImageBitmap()
                         } catch (_: Exception) {
                             null
                         }
@@ -211,7 +266,7 @@ class LiveAppTrafficSampler(private val context: Context) {
     private fun loadSystemIcon(): ImageBitmap? {
         return try {
             val appInfo = packageManager.getApplicationInfo("android", 0)
-            packageManager.getApplicationIcon(appInfo).toBitmap(width = 64, height = 64).asImageBitmap()
+            packageManager.getApplicationIcon(appInfo).toBitmap(width = 48, height = 48).asImageBitmap()
         } catch (_: Exception) {
             null
         }
