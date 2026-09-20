@@ -131,6 +131,12 @@ class SettingsViewModel(
     val widgetUpdateInterval: StateFlow<Int> = repository.widgetUpdateInterval
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), initialValue = 30)
 
+    val floatingWindowEnabled: StateFlow<Boolean> = repository.floatingWindowEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), initialValue = false)
+
+    val notificationTapAction: StateFlow<String> = repository.notificationTapAction
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), initialValue = "APP")
+
     fun toggleMonitoring(enabled: Boolean) {
         viewModelScope.launch {
             repository.setMonitoringEnabled(enabled)
@@ -244,6 +250,18 @@ class SettingsViewModel(
     fun setVpnDisclosureAccepted(accepted: Boolean) {
         viewModelScope.launch {
             repository.setVpnDisclosureAccepted(accepted)
+        }
+    }
+
+    fun setFloatingWindowEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            repository.setFloatingWindowEnabled(enabled)
+        }
+    }
+
+    fun setNotificationTapAction(action: String) {
+        viewModelScope.launch {
+            repository.setNotificationTapAction(action)
         }
     }
 

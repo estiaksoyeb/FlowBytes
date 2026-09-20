@@ -67,12 +67,25 @@ fun SettingsScreen(
         }
     }
 
+    val overlayPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        if (PermissionHelper.hasOverlayPermission(context)) {
+            viewModel.setFloatingWindowEnabled(true)
+            com.ray.flowmeter.floating.FloatingTrafficManager.getInstance(context).show()
+        } else {
+            viewModel.setFloatingWindowEnabled(false)
+        }
+    }
+
     val themeTransition = LocalThemeTransition.current
     val monitoringEnabled by viewModel.monitoringEnabled.collectAsState()
     val themeMode by viewModel.themeMode.collectAsState()
     val useMaterialYou by viewModel.useMaterialYou.collectAsState()
     val useAmoled by viewModel.useAmoled.collectAsState()
     val showNotification by viewModel.showNotification.collectAsState()
+    val floatingWindowEnabled by viewModel.floatingWindowEnabled.collectAsState()
+    val notificationTapAction by viewModel.notificationTapAction.collectAsState()
     val notificationContentType by viewModel.notificationContentType.collectAsState()
     val speedUnit by viewModel.speedUnit.collectAsState()
     val notificationIconScale by viewModel.notificationIconScale.collectAsState()
@@ -384,7 +397,55 @@ fun SettingsScreen(
             )
         }
 
-        SettingsGroup(title = stringResource(R.string.settings_section_alerts), staggerIndex = 3) {
+        SettingsGroup(title = stringResource(R.string.settings_section_floating_window), staggerIndex = 3) {
+            SettingsItem(
+                icon = Icons.Rounded.PictureInPicture,
+                title = stringResource(R.string.settings_floating_window_toggle),
+                subtitle = stringResource(R.string.settings_floating_window_desc),
+                trailingContent = {
+                    Switch(
+                        checked = floatingWindowEnabled,
+                        onCheckedChange = { enabled ->
+                            if (enabled) {
+                                if (PermissionHelper.hasOverlayPermission(context)) {
+                                    viewModel.setFloatingWindowEnabled(true)
+                                    com.ray.flowmeter.floating.FloatingTrafficManager.getInstance(context).show()
+                                } else {
+                                    val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, "package:${context.packageName}".toUri())
+                                    overlayPermissionLauncher.launch(intent)
+                                }
+                            } else {
+                                viewModel.setFloatingWindowEnabled(false)
+                                com.ray.flowmeter.floating.FloatingTrafficManager.getInstance(context).hide()
+                            }
+                        },
+                        colors = switchColors,
+                        thumbContent = { thumbContent(floatingWindowEnabled) }
+                    )
+                }
+            )
+
+            SettingsItem(
+                icon = Icons.Rounded.TouchApp,
+                title = stringResource(R.string.settings_notification_tap_action),
+                subtitle = if (notificationTapAction == "FLOATING") {
+                    stringResource(R.string.action_open_floating)
+                } else {
+                    stringResource(R.string.action_open_app)
+                },
+                onClick = {
+                    val nextAction = if (notificationTapAction == "APP") "FLOATING" else "APP"
+                    if (nextAction == "FLOATING" && !PermissionHelper.hasOverlayPermission(context)) {
+                        val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, "package:${context.packageName}".toUri())
+                        overlayPermissionLauncher.launch(intent)
+                    } else {
+                        viewModel.setNotificationTapAction(nextAction)
+                    }
+                }
+            )
+        }
+
+        SettingsGroup(title = stringResource(R.string.settings_section_alerts), staggerIndex = 4) {
             SettingsItem(
                 icon = Icons.Rounded.WarningAmber,
                 title = stringResource(R.string.settings_data_alerts),

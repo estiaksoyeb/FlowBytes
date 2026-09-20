@@ -76,3 +76,48 @@ class SpeedTileService : TileService() {
         serviceScope.cancel()
     }
 }
+
+// Quick Settings Tile Service to toggle the live per-app traffic floating window overlay.
+class FloatingTrafficTileService : TileService() {
+
+    override fun onStartListening() {
+        super.onStartListening()
+        updateTile()
+    }
+
+    override fun onClick() {
+        super.onClick()
+        val manager = com.ray.flowmeter.floating.FloatingTrafficManager.getInstance(applicationContext)
+        if (android.provider.Settings.canDrawOverlays(applicationContext)) {
+            manager.toggle()
+            updateTile()
+        } else {
+            val intent = Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
+                data = android.net.Uri.parse("package:$packageName")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                val pi = android.app.PendingIntent.getActivity(
+                    this,
+                    0,
+                    intent,
+                    android.app.PendingIntent.FLAG_IMMUTABLE
+                )
+                startActivityAndCollapse(pi)
+            } else {
+                @Suppress("DEPRECATION")
+                startActivityAndCollapse(intent)
+            }
+        }
+    }
+
+    private fun updateTile() {
+        val tile = qsTile ?: return
+        val isShowing = com.ray.flowmeter.floating.FloatingTrafficManager.getInstance(applicationContext).isWindowShowing()
+        tile.state = if (isShowing) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
+        tile.label = getString(R.string.tile_floating_traffic)
+        tile.subtitle = getString(R.string.app_name)
+        tile.updateTile()
+    }
+}
+

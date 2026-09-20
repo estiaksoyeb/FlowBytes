@@ -64,6 +64,9 @@ class NetworkMonitoringService : Service() {
         const val EXTRA_NAVIGATE_TO_LIMITS = "extra_navigate_to_limits"
         const val EXTRA_MUTE_APP_NAME = "extra_mute_app_name"
         const val EXTRA_DISMISS_NOTIFICATION_ID = "extra_dismiss_notification_id"
+        const val ACTION_TOGGLE_FLOATING_TRAFFIC = "com.ray.flowmeter.TOGGLE_FLOATING_TRAFFIC"
+        const val ACTION_SHOW_FLOATING_TRAFFIC = "com.ray.flowmeter.SHOW_FLOATING_TRAFFIC"
+        const val ACTION_HIDE_FLOATING_TRAFFIC = "com.ray.flowmeter.HIDE_FLOATING_TRAFFIC"
         
         @Volatile
         var isRunning = false
@@ -128,6 +131,7 @@ class NetworkMonitoringService : Service() {
     private var widgetUsageType = "DAILY"
     private var widgetShowSpeed = true
     private var speedUnitStr = "BYTES"
+    private var notificationTapAction = "APP"
 
     private var isScreenOn = true
 
@@ -237,6 +241,14 @@ class NetworkMonitoringService : Service() {
         serviceScope.launch { repository.trafficAlertCooldown.collect { trafficAlertCooldown = it } }
         serviceScope.launch { repository.trafficResetBelowThresholdTime.collect { trafficResetBelowThresholdTime = it } }
         serviceScope.launch { repository.trafficResetSpeed.collect { trafficResetSpeed = it } }
+        serviceScope.launch {
+            repository.notificationTapAction.collect {
+                if (notificationTapAction != it) {
+                    notificationTapAction = it
+                    updateStats(force = true)
+                }
+            }
+        }
 
         // Initialize baseline immediately for instant first measurement
         lastRxBytes = TrafficStats.getTotalRxBytes()
@@ -284,6 +296,21 @@ class NetworkMonitoringService : Service() {
             return START_STICKY
         }
 
+        when (intent?.action) {
+            ACTION_TOGGLE_FLOATING_TRAFFIC -> {
+                com.ray.flowmeter.floating.FloatingTrafficManager.getInstance(applicationContext).toggle()
+                return START_STICKY
+            }
+            ACTION_SHOW_FLOATING_TRAFFIC -> {
+                com.ray.flowmeter.floating.FloatingTrafficManager.getInstance(applicationContext).show()
+                return START_STICKY
+            }
+            ACTION_HIDE_FLOATING_TRAFFIC -> {
+                com.ray.flowmeter.floating.FloatingTrafficManager.getInstance(applicationContext).hide()
+                return START_STICKY
+            }
+        }
+
         cancelNetworkWakeup()
         startMonitoring()
 
@@ -321,6 +348,9 @@ class NetworkMonitoringService : Service() {
         serviceJob.cancel()
         try {
             unregisterReceiver(screenStateReceiver)
+        } catch (_: Exception) {}
+        try {
+            com.ray.flowmeter.floating.FloatingTrafficManager.getInstance(applicationContext).hide()
         } catch (_: Exception) {}
     }
 
@@ -862,13 +892,25 @@ class NetworkMonitoringService : Service() {
     }
 
     private fun createNotification(customLayout: RemoteViews, iconText: String): Notification {
-        val notificationIntent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            notificationIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
+        val contentPendingIntent = if (notificationTapAction == "FLOATING" && com.ray.flowmeter.utils.PermissionHelper.hasOverlayPermission(this)) {
+            val floatingIntent = Intent(this, NetworkMonitoringService::class.java).apply {
+                action = ACTION_TOGGLE_FLOATING_TRAFFIC
+            }
+            PendingIntent.getService(
+                this,
+                10,
+                floatingIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+        } else {
+            val notificationIntent = Intent(this, MainActivity::class.java)
+            PendingIntent.getActivity(
+                this,
+                0,
+                notificationIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+        }
 
         val activeChannelId = if (highPriority) "SPEED_METER_V7_HIGH" else "SPEED_METER_V7_DEFAULT"
 
@@ -878,7 +920,7 @@ class NetworkMonitoringService : Service() {
         val builder = NotificationCompat.Builder(this, activeChannelId)
             .setCustomContentView(customLayout)
             .setCustomBigContentView(customLayout)
-            .setContentIntent(pendingIntent)
+            .setContentIntent(contentPendingIntent)
             .setOngoing(true)
             .setShowWhen(false)
             .setWhen(notificationTime)
@@ -899,6 +941,23 @@ class NetworkMonitoringService : Service() {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             builder.foregroundServiceBehavior = NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE
+        }
+
+        if (com.ray.flowmeter.utils.PermissionHelper.hasOverlayPermission(this)) {
+            val toggleIntent = Intent(this, NetworkMonitoringService::class.java).apply {
+                action = ACTION_TOGGLE_FLOATING_TRAFFIC
+            }
+            val togglePendingIntent = PendingIntent.getService(
+                this,
+                11,
+                toggleIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            builder.addAction(
+                0,
+                getString(R.string.tile_floating_traffic),
+                togglePendingIntent
+            )
         }
 
         return builder.build()

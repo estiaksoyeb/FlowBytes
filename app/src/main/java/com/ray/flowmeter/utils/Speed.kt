@@ -128,4 +128,8 @@ object PermissionHelper {
         }
         return mode == android.app.AppOpsManager.MODE_ALLOWED
     }
+
+    fun hasOverlayPermission(context: android.content.Context): Boolean {
+        return android.provider.Settings.canDrawOverlays(context)
+    }
 }

@@ -248,6 +248,8 @@ class UserPreferencesRepository(private val context: Context) {
         val SPEED_UNIT = stringPreferencesKey("speed_unit")
         val THEME_TRANSITION_KIND = stringPreferencesKey("theme_transition_kind")
         val SCREEN_TRANSITION_KIND = stringPreferencesKey("screen_transition_kind")
+        val FLOATING_WINDOW_ENABLED = booleanPreferencesKey("floating_window_enabled")
+        val NOTIFICATION_TAP_ACTION = stringPreferencesKey("notification_tap_action")
     }
 
     private val preferencesFlow = context.dataStore.data
@@ -314,6 +316,16 @@ class UserPreferencesRepository(private val context: Context) {
     val notificationContentType: Flow<String> = preferencesFlow
         .map { preferences ->
             preferences[PreferencesKeys.NOTIFICATION_CONTENT_TYPE] ?: "BOTH"
+        }.distinctUntilChanged()
+
+    val floatingWindowEnabled: Flow<Boolean> = preferencesFlow
+        .map { preferences ->
+            preferences[PreferencesKeys.FLOATING_WINDOW_ENABLED] ?: false
+        }.distinctUntilChanged()
+
+    val notificationTapAction: Flow<String> = preferencesFlow
+        .map { preferences ->
+            preferences[PreferencesKeys.NOTIFICATION_TAP_ACTION] ?: "APP"
         }.distinctUntilChanged()
 
     val dataDailyLimitConfigured: Flow<Boolean> = preferencesFlow
@@ -654,6 +666,18 @@ class UserPreferencesRepository(private val context: Context) {
     suspend fun setNotificationContentType(type: String) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.NOTIFICATION_CONTENT_TYPE] = type
+        }
+    }
+
+    suspend fun setFloatingWindowEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.FLOATING_WINDOW_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setNotificationTapAction(action: String) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.NOTIFICATION_TAP_ACTION] = action
         }
     }
 

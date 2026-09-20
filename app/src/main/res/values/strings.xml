@@ -105,6 +105,20 @@
     <string name="settings_hide_offline">Hide When Offline</string>
     <string name="settings_hide_offline_desc">Automatically hide the speed indicator when disconnected</string>
 
+    <!-- Settings: Floating Window / Live Traffic -->
+    <string name="settings_section_floating_window">Floating Window</string>
+    <string name="settings_floating_window_toggle">Live Traffic Window</string>
+    <string name="settings_floating_window_desc">Show real-time per-app data usage in a movable floating window</string>
+    <string name="settings_notification_tap_action">Notification Tap Action</string>
+    <string name="settings_notification_tap_desc">Action when tapping the ongoing speed notification</string>
+    <string name="action_open_app">Open App</string>
+    <string name="action_open_floating">Open Floating Window</string>
+    <string name="floating_window_title">Network Traffic</string>
+    <string name="floating_window_no_traffic">No active network traffic</string>
+    <string name="msg_overlay_permission_required">Display over other apps permission is required for the floating window.</string>
+    <string name="btn_grant_permission">Grant</string>
+    <string name="tile_floating_traffic">Live Traffic</string>
+
     <string name="settings_section_widget">Home Widget</string>
     <string name="settings_widget_show_speed">Show Speed</string>
     <string name="settings_widget_show_speed_desc">Display real-time download and upload speeds on the widget</string>
