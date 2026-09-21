@@ -4,6 +4,7 @@ import android.app.usage.NetworkStats
 import android.app.usage.NetworkStatsManager
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.TrafficStats
 import android.os.Process
@@ -11,6 +12,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.graphics.drawable.toBitmap
 import com.ray.flowmeter.R
+import com.ray.flowmeter.data.UserPreferencesRepository
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,15 +23,30 @@ import kotlin.math.max
 /**
  * Custom speed formatter strictly for the floating window.
  * Displays exact bytes (e.g. 252 B/s) without altering global notification/widget formatting.
+ * Adapts to user's speed unit preference (BYTES vs BITS).
  */
-fun formatFloatingSpeed(bytesPerSecond: Long): String {
+fun formatFloatingSpeed(bytesPerSecond: Long, speedUnit: String = "BYTES"): String {
     val locale = Locale.getDefault()
     val bytes = bytesPerSecond.coerceAtLeast(0L)
+    val isBits = speedUnit == "BITS"
+    val value = if (isBits) bytes * 8.0 else bytes.toDouble()
     return when {
-        bytes >= 1_000_000_000L -> String.format(locale, "%.1f GB/s", bytes / 1_000_000_000.0)
-        bytes >= 1_000_000L -> String.format(locale, "%.1f MB/s", bytes / 1_000_000.0)
-        bytes >= 1_000L -> String.format(locale, "%.0f KB/s", bytes / 1_000.0)
-        else -> String.format(locale, "%d B/s", bytes)
+        value >= 1_000_000_000.0 -> {
+            val unit = if (isBits) "Gbps" else "GB/s"
+            String.format(locale, "%.1f %s", value / 1_000_000_000.0, unit)
+        }
+        value >= 1_000_000.0 -> {
+            val unit = if (isBits) "Mbps" else "MB/s"
+            String.format(locale, "%.1f %s", value / 1_000_000.0, unit)
+        }
+        value >= 1_000.0 -> {
+            val unit = if (isBits) "kbps" else "KB/s"
+            String.format(locale, "%.0f %s", value / 1_000.0, unit)
+        }
+        else -> {
+            val unit = if (isBits) "bps" else "B/s"
+            String.format(locale, "%d %s", value.toLong(), unit)
+        }
     }
 }
 
@@ -41,6 +58,9 @@ class LiveAppTrafficSampler(private val context: Context) {
     private var sampleJob: Job? = null
     private val packageManager: PackageManager = context.packageManager
     private val networkStatsManager: NetworkStatsManager? = context.getSystemService(NetworkStatsManager::class.java)
+    private val connectivityManager: ConnectivityManager? = context.getSystemService(ConnectivityManager::class.java)
+    private val repository = UserPreferencesRepository(context)
+    private var speedUnit: String = "BYTES"
 
     // Cached app metadata to avoid repeated PackageManager queries
     private data class CachedAppInfo(
@@ -50,37 +70,51 @@ class LiveAppTrafficSampler(private val context: Context) {
     )
     private val appInfoCache = mutableMapOf<Int, CachedAppInfo>()
 
-    // Snapshots for delta calculations
+    // Snapshots for device total traffic calculation (TrafficStats)
     private var lastTotalRxBytes: Long = 0L
     private var lastTotalTxBytes: Long = 0L
     private var lastSampleTime: Long = 0L
-    private var lastUidStats = mutableMapOf<Int, Pair<Long, Long>>() // uid -> (rx, tx)
 
-    // Active app tracking with decay/grace period (prevents rapid flickering)
+    // Snapshots for per-UID delta calculation (NetworkStatsManager)
+    private var lastSyncedUidStats = mutableMapOf<Int, Pair<Long, Long>>() // uid -> (rx, tx)
+    private var lastSyncTime: Long = 0L
+
+    // Active app tracking
     private data class TrackedApp(
         val uid: Int,
         var rxSpeed: Long,
         var txSpeed: Long,
         var totalSpeed: Long,
-        var lastActiveTime: Long
+        var rxShare: Double = 0.0,
+        var txShare: Double = 0.0,
+        var lastActiveTime: Long = 0L,
+        var silentSyncCount: Int = 0
     )
     private val activeAppHistory = mutableMapOf<Int, TrackedApp>()
 
     fun start(scope: CoroutineScope) {
         if (sampleJob?.isActive == true) return
 
-        // Initialize baselines
-        val now = System.currentTimeMillis()
-        lastTotalRxBytes = TrafficStats.getTotalRxBytes()
-        lastTotalTxBytes = TrafficStats.getTotalTxBytes()
-        lastSampleTime = now
-        lastUidStats.clear()
-        activeAppHistory.clear()
-        captureUidStats(lastUidStats)
+        // Collect speed unit preference from repository
+        scope.launch(Dispatchers.IO) {
+            repository.speedUnit.collect { unit ->
+                speedUnit = unit
+            }
+        }
 
         sampleJob = scope.launch(Dispatchers.IO) {
+            // Baseline initialization on IO thread
+            val now = System.currentTimeMillis()
+            lastTotalRxBytes = TrafficStats.getTotalRxBytes()
+            lastTotalTxBytes = TrafficStats.getTotalTxBytes()
+            lastSampleTime = now
+            lastSyncTime = now
+            lastSyncedUidStats.clear()
+            activeAppHistory.clear()
+            captureUidStats(lastSyncedUidStats)
+
             while (isActive) {
-                delay(1500L) // Stable 1.5s interval
+                delay(1000L) // Responsive 1-second interval
                 try {
                     updateSample()
                 } catch (e: Exception) {
@@ -94,92 +128,187 @@ class LiveAppTrafficSampler(private val context: Context) {
         sampleJob?.cancel()
         sampleJob = null
         activeAppHistory.clear()
+        lastSyncedUidStats.clear()
+    }
+
+    private fun isVpnActive(): Boolean {
+        return try {
+            val activeNet = connectivityManager?.activeNetwork ?: return false
+            val caps = connectivityManager.getNetworkCapabilities(activeNet) ?: return false
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun updateSample() {
         val now = System.currentTimeMillis()
-        val dtSec = max((now - lastSampleTime) / 1000.0, 0.5)
+        val dtSec = max((now - lastSampleTime) / 1000.0, 0.1)
 
-        // 1. Total Speeds via TrafficStats (instantaneous & accurate)
+        // 1. Total device speeds via TrafficStats (instantaneous & accurate)
         val currentTotalRx = TrafficStats.getTotalRxBytes()
         val currentTotalTx = TrafficStats.getTotalTxBytes()
 
-        val totalRxDiff = (currentTotalRx - lastTotalRxBytes).coerceAtLeast(0L)
-        val totalTxDiff = (currentTotalTx - lastTotalTxBytes).coerceAtLeast(0L)
+        val rawRxDiff = (currentTotalRx - lastTotalRxBytes).coerceAtLeast(0L)
+        val rawTxDiff = (currentTotalTx - lastTotalTxBytes).coerceAtLeast(0L)
 
-        val rxSpeed = (totalRxDiff / dtSec).toLong()
-        val txSpeed = (totalTxDiff / dtSec).toLong()
+        // If a VPN is connected, Android's /proc/net/dev counts packets on physical interface (wlan0/rmnet)
+        // AND on virtual tunnel interface (tun0), causing TrafficStats to be doubled. Normalize if VPN active.
+        val isVpn = isVpnActive()
+        val vpnFactor = if (isVpn) 2.0 else 1.0
+
+        val rxSpeed = ((rawRxDiff / dtSec) / vpnFactor).toLong()
+        val txSpeed = ((rawTxDiff / dtSec) / vpnFactor).toLong()
         val totalSpeed = rxSpeed + txSpeed
 
-        // Snapshots for delta calculations
         lastTotalRxBytes = currentTotalRx
         lastTotalTxBytes = currentTotalTx
         lastSampleTime = now
 
-        // 2. Per-UID Speeds via NetworkStatsManager delta
+        // 2. Per-UID Attribution via NetworkStatsManager
         val currentUidStats = mutableMapOf<Int, Pair<Long, Long>>()
         captureUidStats(currentUidStats)
 
-        // Identify current traffic deltas
-        val activeUidsThisCycle = mutableSetOf<Int>()
+        var totalNewRx = 0L
+        var totalNewTx = 0L
+        val uidRxDeltas = mutableMapOf<Int, Long>()
+        val uidTxDeltas = mutableMapOf<Int, Long>()
 
         for ((uid, currentBytes) in currentUidStats) {
-            val previousBytes = lastUidStats[uid] ?: currentBytes
+            val previousBytes = lastSyncedUidStats[uid] ?: currentBytes
             val rxDiff = (currentBytes.first - previousBytes.first).coerceAtLeast(0L)
             val txDiff = (currentBytes.second - previousBytes.second).coerceAtLeast(0L)
-            val appTotalDiff = rxDiff + txDiff
 
-            if (appTotalDiff > 0) {
-                val appRxSpeed = (rxDiff / dtSec).toLong()
-                val appTxSpeed = (txDiff / dtSec).toLong()
-                val appTotalSpeed = appRxSpeed + appTxSpeed
-
-                activeAppHistory[uid] = TrackedApp(
-                    uid = uid,
-                    rxSpeed = appRxSpeed,
-                    txSpeed = appTxSpeed,
-                    totalSpeed = appTotalSpeed,
-                    lastActiveTime = now
-                )
-                activeUidsThisCycle.add(uid)
+            if (rxDiff > 0L) {
+                uidRxDeltas[uid] = rxDiff
+                totalNewRx += rxDiff
+            }
+            if (txDiff > 0L) {
+                uidTxDeltas[uid] = txDiff
+                totalNewTx += txDiff
             }
         }
 
-        // Update previous snapshot
-        lastUidStats = currentUidStats
+        val hasNewSync = totalNewRx > 0L || totalNewTx > 0L
 
-        // For apps that had traffic recently but were silent in this cycle:
-        // Keep them for a 3.5s grace period with decaying speed so the UI doesn't jump
-        val iterator = activeAppHistory.entries.iterator()
-        while (iterator.hasNext()) {
-            val entry = iterator.next()
-            val uid = entry.key
-            val tracked = entry.value
+        if (hasNewSync) {
+            val elapsedSyncSec = max((now - lastSyncTime) / 1000.0, 0.5)
+            lastSyncedUidStats = currentUidStats
+            lastSyncTime = now
 
-            if (uid !in activeUidsThisCycle) {
-                val elapsedSinceActive = now - tracked.lastActiveTime
-                if (elapsedSinceActive > 3500L) {
-                    iterator.remove()
+            val activeUidsInSync = uidRxDeltas.keys + uidTxDeltas.keys
+
+            for (uid in activeUidsInSync) {
+                val rxDelta = uidRxDeltas[uid] ?: 0L
+                val txDelta = uidTxDeltas[uid] ?: 0L
+
+                val rxShare = if (totalNewRx > 0L) (rxDelta.toDouble() / totalNewRx).coerceIn(0.0, 1.0) else 0.0
+                val txShare = if (totalNewTx > 0L) (txDelta.toDouble() / totalNewTx).coerceIn(0.0, 1.0) else 0.0
+
+                val avgRxRate = (rxDelta / elapsedSyncSec).toLong()
+                val avgTxRate = (txDelta / elapsedSyncSec).toLong()
+
+                val appRxSpeed = if (rxSpeed > 0L && totalNewRx > 0L) {
+                    minOf((rxSpeed * rxShare).toLong(), rxSpeed)
                 } else {
-                    // Decay speed smoothly to 0
-                    tracked.rxSpeed = (tracked.rxSpeed * 0.25).toLong()
-                    tracked.txSpeed = (tracked.txSpeed * 0.25).toLong()
+                    minOf(avgRxRate, rxSpeed)
+                }
+
+                val appTxSpeed = if (txSpeed > 0L && totalNewTx > 0L) {
+                    minOf((txSpeed * txShare).toLong(), txSpeed)
+                } else {
+                    minOf(avgTxRate, txSpeed)
+                }
+
+                val existing = activeAppHistory[uid]
+                if (existing != null) {
+                    existing.rxSpeed = appRxSpeed
+                    existing.txSpeed = appTxSpeed
+                    existing.totalSpeed = appRxSpeed + appTxSpeed
+                    existing.rxShare = rxShare
+                    existing.txShare = txShare
+                    existing.lastActiveTime = now
+                    existing.silentSyncCount = 0
+                } else {
+                    activeAppHistory[uid] = TrackedApp(
+                        uid = uid,
+                        rxSpeed = appRxSpeed,
+                        txSpeed = appTxSpeed,
+                        totalSpeed = appRxSpeed + appTxSpeed,
+                        rxShare = rxShare,
+                        txShare = txShare,
+                        lastActiveTime = now,
+                        silentSyncCount = 0
+                    )
+                }
+            }
+
+            for ((uid, tracked) in activeAppHistory) {
+                if (uid !in activeUidsInSync) {
+                    tracked.silentSyncCount++
+                    tracked.rxShare = 0.0
+                    tracked.txShare = 0.0
+                    tracked.rxSpeed = (tracked.rxSpeed * 0.3).toLong()
+                    tracked.txSpeed = (tracked.txSpeed * 0.3).toLong()
                     tracked.totalSpeed = tracked.rxSpeed + tracked.txSpeed
+                }
+            }
+        } else {
+            // Between syncs: if device traffic is active, maintain app speeds proportionally
+            if (totalSpeed >= 1000L) {
+                for (tracked in activeAppHistory.values) {
+                    if (tracked.rxShare > 0.0 || tracked.txShare > 0.0) {
+                        val appRx = if (rxSpeed > 0L && tracked.rxShare > 0.0) {
+                            minOf((rxSpeed * tracked.rxShare).toLong(), rxSpeed)
+                        } else 0L
+
+                        val appTx = if (txSpeed > 0L && tracked.txShare > 0.0) {
+                            minOf((txSpeed * tracked.txShare).toLong(), txSpeed)
+                        } else 0L
+
+                        tracked.rxSpeed = appRx
+                        tracked.txSpeed = appTx
+                        tracked.totalSpeed = appRx + appTx
+
+                        if (tracked.totalSpeed >= 500L) {
+                            tracked.lastActiveTime = now
+                        }
+                    }
+                }
+            } else {
+                for (tracked in activeAppHistory.values) {
+                    tracked.rxSpeed = 0L
+                    tracked.txSpeed = 0L
+                    tracked.totalSpeed = 0L
                 }
             }
         }
 
-        // Sort active apps by total speed (or freshness)
+        // Clean up dead/silent apps:
+        // Either silent for multiple syncs or device has been idle for > 3.0s
+        val iterator = activeAppHistory.entries.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            val tracked = entry.value
+            val timeSinceActive = now - tracked.lastActiveTime
+
+            if (tracked.silentSyncCount >= 2 || (timeSinceActive > 3000L && totalSpeed < 1000L)) {
+                iterator.remove()
+            }
+        }
+
+        // Sort active apps by total speed descending
         val sortedTracked = activeAppHistory.values
+            .filter { it.totalSpeed > 0L || (now - it.lastActiveTime) < 2000L }
             .sortedWith(compareByDescending<TrackedApp> { it.totalSpeed }.thenByDescending { it.lastActiveTime })
             .take(3)
 
-        val maxActiveSpeed = sortedTracked.firstOrNull()?.totalSpeed?.coerceAtLeast(1L) ?: 1L
+        val referenceSpeed = maxOf(totalSpeed, sortedTracked.firstOrNull()?.totalSpeed ?: 1L, 1L)
 
         val formattedList = sortedTracked.map { tracked ->
             val info = resolveAppInfo(tracked.uid)
-            val rxRatio = (tracked.rxSpeed.toFloat() / maxActiveSpeed).coerceIn(0f, 1f)
-            val txRatio = (tracked.txSpeed.toFloat() / maxActiveSpeed).coerceIn(0f, 1f)
+            val rxRatio = (tracked.rxSpeed.toFloat() / referenceSpeed).coerceIn(0f, 1f)
+            val txRatio = (tracked.txSpeed.toFloat() / referenceSpeed).coerceIn(0f, 1f)
 
             ActiveAppTraffic(
                 uid = tracked.uid,
@@ -198,6 +327,7 @@ class LiveAppTrafficSampler(private val context: Context) {
             rxSpeed = rxSpeed,
             txSpeed = txSpeed,
             totalSpeed = totalSpeed,
+            speedUnit = speedUnit,
             activeApps = formattedList
         )
     }
@@ -210,7 +340,8 @@ class LiveAppTrafficSampler(private val context: Context) {
 
         val transports = listOf(
             NetworkCapabilities.TRANSPORT_CELLULAR,
-            NetworkCapabilities.TRANSPORT_WIFI
+            NetworkCapabilities.TRANSPORT_WIFI,
+            NetworkCapabilities.TRANSPORT_ETHERNET
         )
 
         for (transport in transports) {

@@ -18,6 +18,7 @@ data class FloatingTrafficState(
     val rxSpeed: Long = 0L,
     val txSpeed: Long = 0L,
     val totalSpeed: Long = 0L,
+    val speedUnit: String = "BYTES",
     val activeApps: List<ActiveAppTraffic> = emptyList(),
     val isExpanded: Boolean = true
 )

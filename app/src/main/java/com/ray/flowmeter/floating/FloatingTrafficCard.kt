@@ -127,13 +127,13 @@ fun FloatingTrafficCard(
                 horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 SpeedChip(
-                    speedText = formatFloatingSpeed(state.rxSpeed),
+                    speedText = formatFloatingSpeed(state.rxSpeed, state.speedUnit),
                     isDownload = true,
                     modifier = Modifier.weight(1f)
                 )
 
                 SpeedChip(
-                    speedText = formatFloatingSpeed(state.txSpeed),
+                    speedText = formatFloatingSpeed(state.txSpeed, state.speedUnit),
                     isDownload = false,
                     modifier = Modifier.weight(1f)
                 )
@@ -165,7 +165,7 @@ fun FloatingTrafficCard(
                     verticalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
                     state.activeApps.take(3).forEach { app ->
-                        AppTrafficRow(app = app)
+                        AppTrafficRow(app = app, speedUnit = state.speedUnit)
                     }
                 }
             }
@@ -220,6 +220,7 @@ private fun SpeedChip(
 @Composable
 private fun AppTrafficRow(
     app: ActiveAppTraffic,
+    speedUnit: String = "BYTES",
     modifier: Modifier = Modifier
 ) {
     val totalRatio = (app.rxRatio + app.txRatio).coerceIn(0f, 1f)
@@ -347,7 +348,7 @@ private fun AppTrafficRow(
                     )
                     Spacer(modifier = Modifier.width(1.5.dp))
                     Text(
-                        text = formatFloatingSpeed(app.rxSpeed),
+                        text = formatFloatingSpeed(app.rxSpeed, speedUnit),
                         color = Color(0xDEFFFFFF),
                         fontSize = 9.sp,
                         fontWeight = FontWeight.SemiBold
@@ -361,7 +362,7 @@ private fun AppTrafficRow(
                     )
                     Spacer(modifier = Modifier.width(1.5.dp))
                     Text(
-                        text = formatFloatingSpeed(app.txSpeed),
+                        text = formatFloatingSpeed(app.txSpeed, speedUnit),
                         color = Color(0xDEFFFFFF),
                         fontSize = 9.sp,
                         fontWeight = FontWeight.SemiBold
@@ -386,7 +387,7 @@ private fun AppTrafficRow(
                     )
                     Spacer(modifier = Modifier.width(2.dp))
                     Text(
-                        text = formatFloatingSpeed(speedToDisplay),
+                        text = formatFloatingSpeed(speedToDisplay, speedUnit),
                         color = Color(0xDEFFFFFF),
                         fontSize = 9.5.sp,
                         fontWeight = FontWeight.SemiBold
