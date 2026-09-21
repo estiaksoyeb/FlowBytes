@@ -471,14 +471,16 @@ class AppUsageViewModel(
 
     private fun resolveUidToInfo(uid: Int, packageManager: PackageManager, systemIcon: ImageBitmap?): ResolvedInfo {
         when (uid) {
-            -2, -4 -> return ResolvedInfo("removed_$uid", applicationContext.getString(R.string.label_removed_apps), null, isSystem = true, isProcess = true)
-            -3, -5 -> return ResolvedInfo("tethering_$uid", applicationContext.getString(R.string.label_tethering), null, isSystem = true, isProcess = true)
+            -2, -4 -> return ResolvedInfo("removed_$uid", applicationContext.getString(R.string.label_removed_apps), null, isSystem = false, isProcess = false)
+            -3, -5, 1073 -> return ResolvedInfo("tethering_$uid", applicationContext.getString(R.string.label_tethering), null, isSystem = false, isProcess = false)
             0 -> return ResolvedInfo("root_0", applicationContext.getString(R.string.label_root), systemIcon, isSystem = true, isProcess = true)
+            3 -> return ResolvedInfo("sys_$uid", "Sys Daemons", systemIcon, isSystem = true, isProcess = true)
             1000 -> return ResolvedInfo("android.system_$uid", applicationContext.getString(R.string.label_android_system), systemIcon, isSystem = true, isProcess = true)
             1051, 1052 -> return ResolvedInfo("android.dns_$uid", applicationContext.getString(R.string.label_dns_resolver), systemIcon, isSystem = true, isProcess = true)
             1020 -> return ResolvedInfo("android.mdns_$uid", applicationContext.getString(R.string.label_mdns_responder), systemIcon, isSystem = true, isProcess = true)
             1013 -> return ResolvedInfo("android.media_$uid", applicationContext.getString(R.string.label_media_service), systemIcon, isSystem = true, isProcess = true)
             1061, 2904 -> return ResolvedInfo("android.ota_$uid", applicationContext.getString(R.string.label_system_update), systemIcon, isSystem = true, isProcess = true)
+            2000 -> return ResolvedInfo("shell_$uid", "Shell", systemIcon, isSystem = true, isProcess = true)
         }
 
         val packages = try {
