@@ -2,11 +2,13 @@ package com.ray.flowmeter.floating
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
 import android.provider.Settings
 import android.view.Gravity
 import android.view.WindowManager
+import com.ray.flowmeter.MainActivity
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -82,6 +84,7 @@ class FloatingTrafficManager private constructor(private val context: Context) {
                     FloatingTrafficCard(
                         state = state,
                         onClose = { hide() },
+                        onOpenApp = { openApp() },
                         modifier = Modifier.pointerInput(Unit) {
                             detectDragGestures { change, dragAmount ->
                                 change.consume()
@@ -101,6 +104,17 @@ class FloatingTrafficManager private constructor(private val context: Context) {
         } catch (e: Exception) {
             e.printStackTrace()
             cleanup()
+        }
+    }
+
+    fun openApp() {
+        try {
+            val intent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Close
@@ -38,6 +39,7 @@ val FLOATING_WINDOW_WIDTH = 240.dp
 fun FloatingTrafficCard(
     state: FloatingTrafficState,
     onClose: () -> Unit,
+    onOpenApp: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -72,7 +74,7 @@ fun FloatingTrafficCard(
                 )
             }
 
-            // Header Row: Minimal Title + Close Icon
+            // Header Row: Minimal Title + Action Icons (Open App & Close)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -87,16 +89,33 @@ fun FloatingTrafficCard(
                     fontWeight = FontWeight.SemiBold
                 )
 
-                IconButton(
-                    onClick = onClose,
-                    modifier = Modifier.size(20.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Close,
-                        contentDescription = "Close",
-                        tint = Color(0x99FFFFFF),
-                        modifier = Modifier.size(13.dp)
-                    )
+                    IconButton(
+                        onClick = onOpenApp,
+                        modifier = Modifier.size(20.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
+                            contentDescription = stringResource(R.string.action_open_app),
+                            tint = Color(0x99FFFFFF),
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onClose,
+                        modifier = Modifier.size(20.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "Close",
+                            tint = Color(0x99FFFFFF),
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
                 }
             }
 
