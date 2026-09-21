@@ -44,6 +44,8 @@ class FloatingTrafficManager private constructor(private val context: Context) {
 
     private var params: WindowManager.LayoutParams? = null
     private var isShowing = false
+    private var posX: Float = 100f
+    private var posY: Float = 200f
 
     fun isWindowShowing(): Boolean = isShowing
 
@@ -54,6 +56,9 @@ class FloatingTrafficManager private constructor(private val context: Context) {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
         managerScope = scope
 
+        posX = 100f
+        posY = 200f
+
         val layoutParams = WindowManager.LayoutParams().apply {
             type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -62,8 +67,8 @@ class FloatingTrafficManager private constructor(private val context: Context) {
             gravity = Gravity.TOP or Gravity.START
             width = WindowManager.LayoutParams.WRAP_CONTENT
             height = WindowManager.LayoutParams.WRAP_CONTENT
-            x = 100
-            y = 200
+            x = posX.toInt()
+            y = posY.toInt()
         }
         params = layoutParams
 
@@ -141,8 +146,10 @@ class FloatingTrafficManager private constructor(private val context: Context) {
         val p = params ?: return
         val view = overlayView ?: return
 
-        p.x = (p.x + dx.toInt()).coerceAtLeast(0)
-        p.y = (p.y + dy.toInt()).coerceAtLeast(0)
+        posX = (posX + dx).coerceAtLeast(0f)
+        posY = (posY + dy).coerceAtLeast(0f)
+        p.x = posX.toInt()
+        p.y = posY.toInt()
 
         try {
             windowManager.updateViewLayout(view, p)

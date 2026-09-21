@@ -196,50 +196,68 @@ class LiveAppTrafficSampler(private val context: Context) {
             lastSyncedUidStats = currentUidStats
             lastSyncTime = now
 
+            // Determine if the NetworkStatsManager sync captured a significant chunk of device traffic
+            val isRxRepresentative = totalNewRx >= (rawRxDiff * 0.25).toLong() || totalNewRx >= 200_000L
+            val isTxRepresentative = totalNewTx >= (rawTxDiff * 0.25).toLong() || totalNewTx >= 200_000L
+
             val activeUidsInSync = uidRxDeltas.keys + uidTxDeltas.keys
 
             for (uid in activeUidsInSync) {
                 val rxDelta = uidRxDeltas[uid] ?: 0L
                 val txDelta = uidTxDeltas[uid] ?: 0L
 
-                val rxShare = if (totalNewRx > 0L) (rxDelta.toDouble() / totalNewRx).coerceIn(0.0, 1.0) else 0.0
-                val txShare = if (totalNewTx > 0L) (txDelta.toDouble() / totalNewTx).coerceIn(0.0, 1.0) else 0.0
-
                 val avgRxRate = (rxDelta / elapsedSyncSec).toLong()
                 val avgTxRate = (txDelta / elapsedSyncSec).toLong()
 
-                val appRxSpeed = if (rxSpeed > 0L && totalNewRx > 0L) {
-                    minOf((rxSpeed * rxShare).toLong(), rxSpeed)
-                } else {
-                    minOf(avgRxRate, rxSpeed)
+                // An app is only granted a traffic share if it actually transferred a significant amount of data (>= 64 KB)
+                // and the sync is representative of device traffic. Tiny pings/heartbeats (e.g. 2 KB) must NEVER be scaled to full device speed!
+                val canScaleRx = rxDelta >= 64_000L && isRxRepresentative && totalNewRx > 0L
+                val canScaleTx = txDelta >= 64_000L && isTxRepresentative && totalNewTx > 0L
+
+                val rxShare = if (canScaleRx) (rxDelta.toDouble() / totalNewRx).coerceIn(0.0, 1.0) else 0.0
+                val txShare = if (canScaleTx) (txDelta.toDouble() / totalNewTx).coerceIn(0.0, 1.0) else 0.0
+
+                // Plausible maximum speed: at most 2.5x the observed average rate or 50 KB/s ceiling
+                val maxPlausibleRx = maxOf((avgRxRate * 2.5).toLong(), 50_000L)
+                val maxPlausibleTx = maxOf((avgTxRate * 2.5).toLong(), 50_000L)
+
+                val appRxSpeed = when {
+                    canScaleRx && rxSpeed > 0L -> minOf((rxSpeed * rxShare).toLong(), maxPlausibleRx, rxSpeed)
+                    rxDelta > 0L -> minOf(avgRxRate, rxSpeed)
+                    else -> 0L
                 }
 
-                val appTxSpeed = if (txSpeed > 0L && totalNewTx > 0L) {
-                    minOf((txSpeed * txShare).toLong(), txSpeed)
-                } else {
-                    minOf(avgTxRate, txSpeed)
+                val appTxSpeed = when {
+                    canScaleTx && txSpeed > 0L -> minOf((txSpeed * txShare).toLong(), maxPlausibleTx, txSpeed)
+                    txDelta > 0L -> minOf(avgTxRate, txSpeed)
+                    else -> 0L
                 }
 
-                val existing = activeAppHistory[uid]
-                if (existing != null) {
-                    existing.rxSpeed = appRxSpeed
-                    existing.txSpeed = appTxSpeed
-                    existing.totalSpeed = appRxSpeed + appTxSpeed
-                    existing.rxShare = rxShare
-                    existing.txShare = txShare
-                    existing.lastActiveTime = now
-                    existing.silentSyncCount = 0
-                } else {
-                    activeAppHistory[uid] = TrackedApp(
-                        uid = uid,
-                        rxSpeed = appRxSpeed,
-                        txSpeed = appTxSpeed,
-                        totalSpeed = appRxSpeed + appTxSpeed,
-                        rxShare = rxShare,
-                        txShare = txShare,
-                        lastActiveTime = now,
-                        silentSyncCount = 0
-                    )
+                val totalAppSpeed = appRxSpeed + appTxSpeed
+
+                // Only record in active history if it has genuine activity
+                if (totalAppSpeed >= 500L || rxDelta >= 10_000L || txDelta >= 10_000L) {
+                    val existing = activeAppHistory[uid]
+                    if (existing != null) {
+                        existing.rxSpeed = appRxSpeed
+                        existing.txSpeed = appTxSpeed
+                        existing.totalSpeed = totalAppSpeed
+                        existing.rxShare = rxShare
+                        existing.txShare = txShare
+                        existing.lastActiveTime = now
+                        existing.silentSyncCount = 0
+                    } else {
+                        activeAppHistory[uid] = TrackedApp(
+                            uid = uid,
+                            rxSpeed = appRxSpeed,
+                            txSpeed = appTxSpeed,
+                            totalSpeed = totalAppSpeed,
+                            rxShare = rxShare,
+                            txShare = txShare,
+                            lastActiveTime = now,
+                            silentSyncCount = 0
+                        )
+                    }
                 }
             }
 
@@ -248,13 +266,13 @@ class LiveAppTrafficSampler(private val context: Context) {
                     tracked.silentSyncCount++
                     tracked.rxShare = 0.0
                     tracked.txShare = 0.0
-                    tracked.rxSpeed = (tracked.rxSpeed * 0.3).toLong()
-                    tracked.txSpeed = (tracked.txSpeed * 0.3).toLong()
+                    tracked.rxSpeed = (tracked.rxSpeed * 0.2).toLong()
+                    tracked.txSpeed = (tracked.txSpeed * 0.2).toLong()
                     tracked.totalSpeed = tracked.rxSpeed + tracked.txSpeed
                 }
             }
         } else {
-            // Between syncs: if device traffic is active, maintain app speeds proportionally
+            // Between syncs: maintain app speeds ONLY if device traffic is active AND the app had a genuine share
             if (totalSpeed >= 1000L) {
                 for (tracked in activeAppHistory.values) {
                     if (tracked.rxShare > 0.0 || tracked.txShare > 0.0) {
@@ -273,33 +291,41 @@ class LiveAppTrafficSampler(private val context: Context) {
                         if (tracked.totalSpeed >= 500L) {
                             tracked.lastActiveTime = now
                         }
+                    } else {
+                        // App did not have an active share, decay it
+                        tracked.rxSpeed = 0L
+                        tracked.txSpeed = 0L
+                        tracked.totalSpeed = 0L
                     }
                 }
             } else {
+                // Device traffic has stopped (< 1 KB/s): zero out and clear shares so stale apps cannot hijack new bursts
                 for (tracked in activeAppHistory.values) {
                     tracked.rxSpeed = 0L
                     tracked.txSpeed = 0L
                     tracked.totalSpeed = 0L
+                    tracked.rxShare = 0.0
+                    tracked.txShare = 0.0
                 }
             }
         }
 
         // Clean up dead/silent apps:
-        // Either silent for multiple syncs or device has been idle for > 3.0s
+        // Silent for 2 syncs OR device has been idle for > 2.5s
         val iterator = activeAppHistory.entries.iterator()
         while (iterator.hasNext()) {
             val entry = iterator.next()
             val tracked = entry.value
             val timeSinceActive = now - tracked.lastActiveTime
 
-            if (tracked.silentSyncCount >= 2 || (timeSinceActive > 3000L && totalSpeed < 1000L)) {
+            if (tracked.silentSyncCount >= 2 || (timeSinceActive > 2500L && totalSpeed < 1000L)) {
                 iterator.remove()
             }
         }
 
-        // Sort active apps by total speed descending
+        // Sort active apps by total speed descending, showing ONLY apps with actual ongoing traffic
         val sortedTracked = activeAppHistory.values
-            .filter { it.totalSpeed > 0L || (now - it.lastActiveTime) < 2000L }
+            .filter { it.totalSpeed >= 100L }
             .sortedWith(compareByDescending<TrackedApp> { it.totalSpeed }.thenByDescending { it.lastActiveTime })
             .take(3)
 
@@ -387,7 +413,11 @@ class LiveAppTrafficSampler(private val context: Context) {
                 }
 
                 if (!packages.isNullOrEmpty()) {
-                    val pkg = packages[0]
+                    val pkg = if (packages.size > 1) {
+                        packages.firstOrNull { packageManager.getLaunchIntentForPackage(it) != null } ?: packages[0]
+                    } else {
+                        packages[0]
+                    }
                     try {
                         val appInfo = packageManager.getApplicationInfo(pkg, 0)
                         val name = packageManager.getApplicationLabel(appInfo).toString()
