@@ -267,7 +267,6 @@ class NetworkMonitoringService : Service() {
         if (!isForeground) {
             val initialLayout = RemoteViews(packageName, R.layout.notification_compact_speed)
             initialLayout.setTextViewText(R.id.text_down, "0 KB/s")
-            initialLayout.setTextViewText(R.id.text_combined, "0 KB/s")
             initialLayout.setTextViewText(R.id.text_up, "0 KB/s")
             initialLayout.setViewVisibility(R.id.layout_usage, View.GONE)
 
@@ -625,7 +624,6 @@ class NetworkMonitoringService : Service() {
                     return
                 } else {
                     customLayout.setTextViewText(R.id.text_down, "0 KB/s")
-                    customLayout.setTextViewText(R.id.text_combined, "0 KB/s")
                     customLayout.setTextViewText(R.id.text_up, "0 KB/s")
 
                     if (showNotificationDetails) {
@@ -705,7 +703,6 @@ class NetworkMonitoringService : Service() {
                 }
                 if (isForeground) {
                     customLayout.setTextViewText(R.id.text_down, getString(R.string.status_not_supported))
-                    customLayout.setTextViewText(R.id.text_combined, "")
                     customLayout.setTextViewText(R.id.text_up, "")
                     customLayout.setViewVisibility(R.id.layout_usage, View.GONE)
                     updateNotification(customLayout, "0 KB/s")
@@ -731,7 +728,6 @@ class NetworkMonitoringService : Service() {
             }
 
             customLayout.setTextViewText(R.id.text_down, formatSpeed(currentRxSpeed))
-            customLayout.setTextViewText(R.id.text_combined, formatSpeed(currentTotalSpeed))
             customLayout.setTextViewText(R.id.text_up, formatSpeed(currentTxSpeed))
 
             if (showNotificationDetails) {
