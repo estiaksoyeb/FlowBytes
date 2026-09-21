@@ -135,8 +135,8 @@ class LiveAppTrafficSampler(private val context: Context) {
             }
 
             while (isActive) {
-                // If device traffic is flowing but no app is resolved yet, poll quickly in 200ms
-                val nextDelay = if (_state.value.totalSpeed >= 100L && activeAppHistory.isEmpty()) 200L else 1000L
+                // If device traffic is flowing but no app is resolved yet, poll quickly in 300ms
+                val nextDelay = if (_state.value.totalSpeed >= 100L && activeAppHistory.isEmpty()) 300L else 1000L
                 delay(nextDelay)
                 try {
                     updateSample()
@@ -156,20 +156,10 @@ class LiveAppTrafficSampler(private val context: Context) {
         lastSyncedUidStats.clear()
     }
 
-    private fun triggerImmediateSample() {
-        val scope = samplerScope ?: return
-        if (sampleJob?.isActive != true) return
-        scope.launch(Dispatchers.IO) {
-            try {
-                updateSample()
-            } catch (_: Exception) {}
-        }
-    }
-
     @Suppress("DEPRECATION")
     private fun registerPollAssist() {
         val nsm = networkStatsManager ?: return
-        val threshold = 10 * 1024L // 10 KB low threshold for instant triggering on small requests
+        val threshold = 16 * 1024L // 16 KB low threshold keeps eBPF alarms continuously primed
 
         try {
             if (usageCallbackWifi == null) {
@@ -181,7 +171,6 @@ class LiveAppTrafficSampler(private val context: Context) {
                                 try {
                                     nsm.registerUsageCallback(ConnectivityManager.TYPE_WIFI, null, threshold, this, mainHandler)
                                 } catch (_: Exception) {}
-                                triggerImmediateSample()
                             }
                         }
                     }
@@ -202,7 +191,6 @@ class LiveAppTrafficSampler(private val context: Context) {
                                 try {
                                     nsm.registerUsageCallback(ConnectivityManager.TYPE_MOBILE, null, threshold, this, mainHandler)
                                 } catch (_: Exception) {}
-                                triggerImmediateSample()
                             }
                         }
                     }
@@ -315,18 +303,41 @@ class LiveAppTrafficSampler(private val context: Context) {
         if (hasNewSync) {
             lastSyncedUidStats = currentUidStats
 
+            // Ensure tiny background pings (e.g. 1 KB) do NOT hijack high device speeds (e.g. 5 MB/s)
+            // A sync is representative if it captured at least 25% of device traffic, or at least 40 KB,
+            // or if device throughput itself is small (< 40 KB/s).
+            val isRxRepresentative = totalNewRx >= (rawRxDiff * 0.25).toLong() || totalNewRx >= 40_000L || rawRxDiff < 40_000L
+            val isTxRepresentative = totalNewTx >= (rawTxDiff * 0.25).toLong() || totalNewTx >= 40_000L || rawTxDiff < 40_000L
+
             val allActiveUids = uidRxDeltas.keys + uidTxDeltas.keys
-            activeAppHistory.clear()
+
+            // Only clear active history if this sync is representative, so an in-progress download is not wiped by a 1 KB ping
+            if (isRxRepresentative || isTxRepresentative) {
+                activeAppHistory.clear()
+            }
 
             for (uid in allActiveUids) {
                 val rxDelta = uidRxDeltas[uid] ?: 0L
                 val txDelta = uidTxDeltas[uid] ?: 0L
 
-                val rxShare = if (totalNewRx > 0L) (rxDelta.toDouble() / totalNewRx).coerceIn(0.0, 1.0) else 0.0
-                val txShare = if (totalNewTx > 0L) (txDelta.toDouble() / totalNewTx).coerceIn(0.0, 1.0) else 0.0
+                val canScaleRx = isRxRepresentative && (rxDelta >= 4_000L || rawRxDiff < 40_000L)
+                val canScaleTx = isTxRepresentative && (txDelta >= 4_000L || rawTxDiff < 40_000L)
 
-                val appRxSpeed = (rxSpeed * rxShare).toLong()
-                val appTxSpeed = (txSpeed * txShare).toLong()
+                val rxShare = if (canScaleRx && totalNewRx > 0L) (rxDelta.toDouble() / totalNewRx).coerceIn(0.0, 1.0) else 0.0
+                val txShare = if (canScaleTx && totalNewTx > 0L) (txDelta.toDouble() / totalNewTx).coerceIn(0.0, 1.0) else 0.0
+
+                val appRxSpeed = if (canScaleRx) {
+                    (rxSpeed * rxShare).toLong()
+                } else if (rxDelta > 0L) {
+                    minOf((rxDelta / dtSec).toLong(), rxSpeed)
+                } else 0L
+
+                val appTxSpeed = if (canScaleTx) {
+                    (txSpeed * txShare).toLong()
+                } else if (txDelta > 0L) {
+                    minOf((txDelta / dtSec).toLong(), txSpeed)
+                } else 0L
+
                 val appTotalSpeed = appRxSpeed + appTxSpeed
 
                 if (appTotalSpeed >= 100L) {
