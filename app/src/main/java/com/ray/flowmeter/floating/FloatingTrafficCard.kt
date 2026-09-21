@@ -222,118 +222,175 @@ private fun AppTrafficRow(
     app: ActiveAppTraffic,
     modifier: Modifier = Modifier
 ) {
-    Row(
+    val totalRatio = (app.rxRatio + app.txRatio).coerceIn(0f, 1f)
+    val displayRatio = if (totalRatio > 0f) totalRatio.coerceIn(0.04f, 1f) else 0f
+    val rxFraction = if (totalRatio > 0f) (app.rxRatio / totalRatio).coerceIn(0f, 1f) else 1f
+
+    val rowShape = RoundedCornerShape(6.dp)
+
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(24.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .height(26.dp)
+            .clip(rowShape)
+            .background(Color(0x14FFFFFF))
     ) {
-        // App Icon
-        if (app.icon != null) {
-            Image(
-                bitmap = app.icon,
-                contentDescription = app.appName,
-                modifier = Modifier
-                    .size(18.dp)
-                    .clip(RoundedCornerShape(4.dp))
-            )
-        } else {
-            Box(
-                modifier = Modifier
-                    .size(18.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color(0x33FFFFFF)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = app.appName.firstOrNull()?.uppercase() ?: "?",
-                    color = Color.White,
-                    fontSize = 9.5.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.width(6.dp))
-
-        // Name + Speed + Progress Bar
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.Center
-        ) {
+        // 1. Full-Row Dual-Color Progress Fill
+        if (displayRatio > 0f) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier
+                    .fillMaxWidth(displayRatio)
+                    .fillMaxHeight()
             ) {
-                Text(
-                    text = app.appName,
-                    color = Color(0xF0FFFFFF),
-                    fontSize = 10.5.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-
-                Spacer(modifier = Modifier.width(4.dp))
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    val isUploadDominant = app.txSpeed > app.rxSpeed
-                    val arrowText = if (isUploadDominant) "↑" else "↓"
-                    val arrowColor = if (isUploadDominant) CyanAccent else OrangeAccent
-
-                    Text(
-                        text = arrowText,
-                        color = arrowColor,
-                        fontSize = 9.5.sp,
-                        fontWeight = FontWeight.Bold
+                if (app.rxRatio > 0f) {
+                    Box(
+                        modifier = Modifier
+                            .weight(rxFraction.coerceAtLeast(0.01f))
+                            .fillMaxHeight()
+                            .background(OrangeAccent.copy(alpha = 0.22f))
                     )
-                    Spacer(modifier = Modifier.width(2.dp))
-                    Text(
-                        text = formatFloatingSpeed(app.totalSpeed),
-                        color = Color(0xD9FFFFFF),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold
+                }
+                if (app.txRatio > 0f) {
+                    Box(
+                        modifier = Modifier
+                            .weight((1f - rxFraction).coerceAtLeast(0.01f))
+                            .fillMaxHeight()
+                            .background(CyanAccent.copy(alpha = 0.22f))
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(2.dp))
-
-            // Dual-segment progress bar
-            Box(
+            // 2. Solid bottom accent line (1.5dp) for crisp visual edge
+            Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(2.dp)
-                    .clip(RoundedCornerShape(1.dp))
-                    .background(ProgressBarBg)
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth(displayRatio)
+                    .height(1.5.dp)
             ) {
-                val totalRatio = (app.rxRatio + app.txRatio).coerceIn(0.01f, 1f)
-                val rxFraction = if (totalRatio > 0f) (app.rxRatio / totalRatio).coerceIn(0f, 1f) else 1f
+                if (app.rxRatio > 0f) {
+                    Box(
+                        modifier = Modifier
+                            .weight(rxFraction.coerceAtLeast(0.01f))
+                            .fillMaxHeight()
+                            .background(OrangeAccent)
+                    )
+                }
+                if (app.txRatio > 0f) {
+                    Box(
+                        modifier = Modifier
+                            .weight((1f - rxFraction).coerceAtLeast(0.01f))
+                            .fillMaxHeight()
+                            .background(CyanAccent)
+                    )
+                }
+            }
+        }
 
-                Row(
+        // 3. Foreground Row: App Icon, Name, and Speed Indicators
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // App Icon
+            if (app.icon != null) {
+                Image(
+                    bitmap = app.icon,
+                    contentDescription = app.appName,
                     modifier = Modifier
-                        .fillMaxWidth(totalRatio)
-                        .fillMaxHeight()
-                        .clip(RoundedCornerShape(1.dp))
+                        .size(16.dp)
+                        .clip(RoundedCornerShape(3.5.dp))
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(16.dp)
+                        .clip(RoundedCornerShape(3.5.dp))
+                        .background(Color(0x33FFFFFF)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    if (app.rxRatio > 0f) {
-                        Box(
-                            modifier = Modifier
-                                .weight(rxFraction.coerceAtLeast(0.01f))
-                                .fillMaxHeight()
-                                .background(OrangeAccent)
-                        )
+                    Text(
+                        text = app.appName.firstOrNull()?.uppercase() ?: "?",
+                        color = Color.White,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(6.dp))
+
+            // App Name (flexible with ellipsis)
+            Text(
+                text = app.appName,
+                color = Color(0xF2FFFFFF),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
+            )
+
+            Spacer(modifier = Modifier.width(4.dp))
+
+            // Speed Indicators: Dual if both active (>= 1KB/s), or single dominant
+            val hasDualTraffic = app.rxSpeed >= 1000L && app.txSpeed >= 1000L
+
+            if (hasDualTraffic) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "↓",
+                        color = OrangeAccent,
+                        fontSize = 8.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.width(1.5.dp))
+                    Text(
+                        text = formatFloatingSpeed(app.rxSpeed),
+                        color = Color(0xDEFFFFFF),
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.width(3.5.dp))
+                    Text(
+                        text = "↑",
+                        color = CyanAccent,
+                        fontSize = 8.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.width(1.5.dp))
+                    Text(
+                        text = formatFloatingSpeed(app.txSpeed),
+                        color = Color(0xDEFFFFFF),
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val isUploadDominant = app.txSpeed > app.rxSpeed
+                    val arrowText = if (isUploadDominant) "↑" else "↓"
+                    val arrowColor = if (isUploadDominant) CyanAccent else OrangeAccent
+                    val speedToDisplay = if (isUploadDominant) {
+                        if (app.txSpeed > 0) app.txSpeed else app.totalSpeed
+                    } else {
+                        if (app.rxSpeed > 0) app.rxSpeed else app.totalSpeed
                     }
-                    if (app.txRatio > 0f) {
-                        Box(
-                            modifier = Modifier
-                                .weight((1f - rxFraction).coerceAtLeast(0.01f))
-                                .fillMaxHeight()
-                                .background(CyanAccent)
-                        )
-                    }
+
+                    Text(
+                        text = arrowText,
+                        color = arrowColor,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Text(
+                        text = formatFloatingSpeed(speedToDisplay),
+                        color = Color(0xDEFFFFFF),
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
         }
