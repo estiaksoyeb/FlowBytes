@@ -259,12 +259,25 @@ private fun AppTrafficRow(
 
                 Spacer(modifier = Modifier.width(4.dp))
 
-                Text(
-                    text = formatFloatingSpeed(app.totalSpeed),
-                    color = Color(0xD9FFFFFF),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val isUploadDominant = app.txSpeed > app.rxSpeed
+                    val arrowText = if (isUploadDominant) "↑" else "↓"
+                    val arrowColor = if (isUploadDominant) CyanAccent else OrangeAccent
+
+                    Text(
+                        text = arrowText,
+                        color = arrowColor,
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Text(
+                        text = formatFloatingSpeed(app.totalSpeed),
+                        color = Color(0xD9FFFFFF),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(2.dp))

@@ -69,9 +69,10 @@ class LiveAppTrafficSampler(private val context: Context) {
         if (sampleJob?.isActive == true) return
 
         // Initialize baselines
+        val now = System.currentTimeMillis()
         lastTotalRxBytes = TrafficStats.getTotalRxBytes()
         lastTotalTxBytes = TrafficStats.getTotalTxBytes()
-        lastSampleTime = System.currentTimeMillis()
+        lastSampleTime = now
         lastUidStats.clear()
         activeAppHistory.clear()
         captureUidStats(lastUidStats)
@@ -79,7 +80,11 @@ class LiveAppTrafficSampler(private val context: Context) {
         sampleJob = scope.launch(Dispatchers.IO) {
             while (isActive) {
                 delay(1500L) // Stable 1.5s interval
-                updateSample()
+                try {
+                    updateSample()
+                } catch (e: Exception) {
+                    android.util.Log.e("LiveAppTrafficSampler", "Error updating sample", e)
+                }
             }
         }
     }
@@ -105,6 +110,7 @@ class LiveAppTrafficSampler(private val context: Context) {
         val txSpeed = (totalTxDiff / dtSec).toLong()
         val totalSpeed = rxSpeed + txSpeed
 
+        // Snapshots for delta calculations
         lastTotalRxBytes = currentTotalRx
         lastTotalTxBytes = currentTotalTx
         lastSampleTime = now
@@ -198,8 +204,8 @@ class LiveAppTrafficSampler(private val context: Context) {
     private fun captureUidStats(outStats: MutableMap<Int, Pair<Long, Long>>) {
         val nsm = networkStatsManager ?: return
         val endTime = System.currentTimeMillis()
-        // Query recent 5 minutes only for extreme speed and low CPU usage
-        val startTime = endTime - (5L * 60 * 1000)
+        // 24-hour window ensures startTime is prior to current bucket start, preventing fractional interpolation
+        val startTime = endTime - (24L * 60 * 60 * 1000)
 
         val transports = listOf(
             NetworkCapabilities.TRANSPORT_CELLULAR,
@@ -208,7 +214,7 @@ class LiveAppTrafficSampler(private val context: Context) {
 
         for (transport in transports) {
             try {
-                val stats = nsm.querySummary(transport, null, startTime, endTime)
+                val stats = nsm.querySummary(transport, null, startTime, endTime) ?: continue
                 val bucket = NetworkStats.Bucket()
                 while (stats.hasNextBucket()) {
                     stats.getNextBucket(bucket)

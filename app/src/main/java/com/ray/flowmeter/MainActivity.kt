@@ -139,25 +139,36 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         splashScreen.setOnExitAnimationListener { splashScreenViewProvider ->
-            val iconView = splashScreenViewProvider.iconView
-            val splashView = splashScreenViewProvider.view
-
-            iconView.animate()
-                .scaleX(1.15f)
-                .scaleY(1.15f)
-                .alpha(0f)
-                .setDuration(250L)
-                .setInterpolator(android.view.animation.AccelerateInterpolator())
-                .start()
-
-            splashView.animate()
-                .alpha(0f)
-                .setDuration(250L)
-                .setInterpolator(android.view.animation.AccelerateInterpolator())
-                .withEndAction {
-                    splashScreenViewProvider.remove()
+            try {
+                val iconView = try {
+                    splashScreenViewProvider.iconView
+                } catch (_: Exception) {
+                    null
                 }
-                .start()
+                val splashView = splashScreenViewProvider.view
+
+                iconView?.animate()
+                    ?.scaleX(1.15f)
+                    ?.scaleY(1.15f)
+                    ?.alpha(0f)
+                    ?.setDuration(250L)
+                    ?.setInterpolator(android.view.animation.AccelerateInterpolator())
+                    ?.start()
+
+                splashView.animate()
+                    .alpha(0f)
+                    .setDuration(250L)
+                    .setInterpolator(android.view.animation.AccelerateInterpolator())
+                    .withEndAction {
+                        splashScreenViewProvider.remove()
+                    }
+                    .start()
+            } catch (_: Exception) {
+                try {
+                    splashScreenViewProvider.remove()
+                } catch (_: Exception) {
+                }
+            }
         }
 
         // Lay out UI components edge-to-edge behind system status/navigation bars.
