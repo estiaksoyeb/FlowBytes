@@ -237,7 +237,7 @@ class LiveAppTrafficSampler(private val context: Context) {
 
         val systemIcon = loadSystemIcon()
         val resolved = when (uid) {
-            -3, -5, 1073 -> CachedAppInfo(context.getString(R.string.label_tethering), "tethering", null)
+            -3, -5 -> CachedAppInfo(context.getString(R.string.label_tethering), "tethering", null)
             -2, -4 -> CachedAppInfo(context.getString(R.string.label_removed_apps), "removed", null)
             0 -> CachedAppInfo(context.getString(R.string.label_root), "root", systemIcon)
             3 -> CachedAppInfo("Sys Daemons", "sys", systemIcon)
@@ -247,6 +247,7 @@ class LiveAppTrafficSampler(private val context: Context) {
             1020 -> CachedAppInfo(context.getString(R.string.label_mdns_responder), "android.mdns", systemIcon)
             1013 -> CachedAppInfo(context.getString(R.string.label_media_service), "android.media", systemIcon)
             1061, 2904 -> CachedAppInfo(context.getString(R.string.label_system_update), "android.ota", systemIcon)
+            1073 -> CachedAppInfo("Network Stack", "android.networkstack", systemIcon)
             else -> {
                 val packages = try {
                     packageManager.getPackagesForUid(uid)
