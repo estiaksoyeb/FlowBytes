@@ -10,6 +10,7 @@ import android.os.Process
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.graphics.drawable.toBitmap
+import com.ray.flowmeter.R
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -234,10 +235,18 @@ class LiveAppTrafficSampler(private val context: Context) {
     private fun resolveAppInfo(uid: Int): CachedAppInfo {
         appInfoCache[uid]?.let { return it }
 
+        val systemIcon = loadSystemIcon()
         val resolved = when (uid) {
-            Process.SYSTEM_UID -> CachedAppInfo("Android System", "android", loadSystemIcon())
+            -3, -5, 1073 -> CachedAppInfo(context.getString(R.string.label_tethering), "tethering", null)
+            -2, -4 -> CachedAppInfo(context.getString(R.string.label_removed_apps), "removed", null)
+            0 -> CachedAppInfo(context.getString(R.string.label_root), "root", systemIcon)
+            3 -> CachedAppInfo("Sys Daemons", "sys", systemIcon)
+            Process.SYSTEM_UID -> CachedAppInfo(context.getString(R.string.label_android_system), "android", systemIcon)
             Process.SHELL_UID -> CachedAppInfo("Shell", "com.android.shell", null)
-            1073 -> CachedAppInfo("Tethering & Hotspot", "tethering", null)
+            1051, 1052 -> CachedAppInfo(context.getString(R.string.label_dns_resolver), "android.dns", systemIcon)
+            1020 -> CachedAppInfo(context.getString(R.string.label_mdns_responder), "android.mdns", systemIcon)
+            1013 -> CachedAppInfo(context.getString(R.string.label_media_service), "android.media", systemIcon)
+            1061, 2904 -> CachedAppInfo(context.getString(R.string.label_system_update), "android.ota", systemIcon)
             else -> {
                 val packages = try {
                     packageManager.getPackagesForUid(uid)
@@ -260,7 +269,17 @@ class LiveAppTrafficSampler(private val context: Context) {
                         CachedAppInfo(pkg, pkg, null)
                     }
                 } else {
-                    CachedAppInfo("UID $uid", "uid_$uid", null)
+                    val name = try {
+                        packageManager.getNameForUid(uid)
+                    } catch (_: Exception) {
+                        null
+                    } ?: if (uid in 0..9999) {
+                        context.getString(R.string.label_system_processes) + " ($uid)"
+                    } else {
+                        "UID $uid"
+                    }
+                    val icon = if (uid in 0..9999) systemIcon else null
+                    CachedAppInfo(name, "uid_$uid", icon)
                 }
             }
         }
@@ -269,12 +288,15 @@ class LiveAppTrafficSampler(private val context: Context) {
         return resolved
     }
 
+    private var cachedSystemIcon: ImageBitmap? = null
     private fun loadSystemIcon(): ImageBitmap? {
-        return try {
+        if (cachedSystemIcon != null) return cachedSystemIcon
+        cachedSystemIcon = try {
             val appInfo = packageManager.getApplicationInfo("android", 0)
             packageManager.getApplicationIcon(appInfo).toBitmap(width = 48, height = 48).asImageBitmap()
         } catch (_: Exception) {
             null
         }
+        return cachedSystemIcon
     }
 }
